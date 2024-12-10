@@ -1,0 +1,243 @@
+---
+title: "MA641_PROJECT_seasonal"
+author: "Ujwala Kamineni"
+date: "2024-04-07"
+output: pdf_document
+---
+
+
+```{r}
+# Loading necessary libraries
+library(forecast)
+library(tseries)
+
+
+
+# Reading the data
+data <- read.csv("C:/Users/Lenovo/Downloads/SeriesReport-202404290224-V.csv", stringsAsFactors = FALSE, skip=7)
+head(data)
+
+data$Period <- as.Date(paste0("01-", data$Period), format="%d-%b-%Y")
+data$Value <- as.numeric(gsub(",", "", data$Value))
+
+# Handling missing values by interpolation
+data$Value <- na.interp(data$Value)
+
+# Seasonal Decomposition
+data_ts <- ts(data$Value, frequency=12)  
+decomp <- stl(data_ts, s.window="periodic")
+plot(decomp)
+
+# ACF and PACF plots
+acf(data_ts, main="Autocorrelation Function")
+pacf(data_ts, main="Partial Autocorrelation Function")
+
+
+```
+
+```{r}
+plot(data$Period, data$Value, type='l', col='blue', lwd=2,
+     xlab='Period', ylab='Value',
+     main='Monthly Sales Data')
+
+```
+
+```{r}
+# ADF test
+adf_test_result <- adf.test(data_ts, alternative = "stationary")
+
+# Printing the result
+print(adf_test_result)
+```
+
+```{r}
+# Seasonal differencing
+data_diff <- diff(data_ts, lag=12)
+# ADF test on seasonally differenced data
+adf.test(data_diff, alternative="stationary")
+
+```
+
+```{r}
+# Visualizing the differenced data
+plot(data_diff, main="Seasonally Differenced Data", xlab="Time", ylab="Value")
+
+# ACF and PACF plots on the final differenced data
+acf(data_diff, main="ACF of Differenced Data")
+pacf(data_diff, main="PACF of Differenced Data")
+
+```
+
+
+
+```{r}
+# Loading necessary libraries
+library(forecast)
+
+# Defining parameter grids
+ps <- seq(from = 0, to = 2, by = 1)
+qs <- seq(from = 0, to = 2, by = 1)
+Ps <- seq(from = 0, to = 2, by = 1)
+Qs <- seq(from = 0, to = 1, by = 1)
+d = 1
+D = 1
+
+# Initializing results storage
+results <- data.frame(AIC = numeric(),
+                      p = integer(),
+                      q = integer(),
+                      P = integer(),
+                      Q = integer(),
+                      SSE = numeric(),
+                      p_value = numeric())
+
+# Loop through parameter combinations
+for (p in ps) {
+  for (q in qs) {
+    for (P in Ps) {
+      for (Q in Qs) {
+        # Ensuring the sum of orders is within a reasonable limit
+        if (p + q +d +D + P + Q <= 10) {
+          # Fitting SARIMA model
+          model <- tryCatch(
+            arima(x = data_diff, 
+                  order = c(p, d, q), 
+                  seasonal = list(order = c(P, D, Q), period = 12)),
+            error = function(e) NULL
+          )
+          
+          # Checking if model fitting was successful
+          if (!is.null(model)) {
+            # Calculate sum of squared errors
+            sse <- sum(model$residuals^2)
+            
+            # Perform Ljung-Box test for residual autocorrelation
+            ljung_box_test <- Box.test(model$residuals, lag = log(length(model$residuals)))
+            p_value <- ljung_box_test$p.value
+            
+            # Store results
+            results <- rbind(results, c(model$aic, p, q, P, Q, sse, p_value))
+          }
+        }
+      }
+    }
+  }
+}
+
+# Name columns
+colnames(results) <- c("AIC", "p", "q", "P", "Q", "SSE", "p_value")
+
+# Sort results by AIC in ascending order
+results <- results[order(results$AIC), ]
+results
+```
+
+```{r}
+library(forecast)
+#best Sarima model using package
+best_model <- auto.arima(data_diff)
+
+summary(best_model)
+```
+```{r}
+
+# Defining SARIMA parameters
+pdqParam <- c(0, 1, 2)  # Non-seasonal parameters: p, d, q
+PDQParam <- c(2, 1, 1)  # Seasonal parameters: P, D, Q
+
+# Fitting SARIMA model
+manualFit <- arima(data_diff, order = pdqParam, seasonal = list(order = PDQParam, period = 12))
+
+# Generating forecasts
+manualPred <- predict(manualFit, n.ahead = 120)
+```
+
+
+```{r}
+acf(residuals(manualFit))
+pacf(residuals(manualFit))
+
+```
+```{r}
+ts.plot(residuals(manualFit),lwd=3,col="red",main='Residual Analysis') 
+```
+
+
+```{r}
+hist(residuals(manualFit), main="Histogram of Residuals", xlab="Residuals", breaks=30)
+```
+```{r}
+library(ggplot2)
+
+# Create a Q-Q plot of the residuals
+qqnorm(residuals(manualFit))
+qqline(residuals(manualFit))
+```
+```{r}
+
+# Plot original series and forecast
+ts.plot(as.ts(data_diff), manualPred$pred, lty = c(1, 3), col = "red", lwd = 3)
+```
+
+```{r}
+# Load necessary libraries
+library(forecast)
+library(lmtest)
+
+# Perform Ljung-Box test
+ljung_box <- Box.test(residuals(manualFit),  type = "Ljung-Box")
+print(ljung_box)
+
+# Goodness-of-fit measures
+# AIC and BIC
+aic <- AIC(manualFit)
+bic <- BIC(manualFit)
+cat("AIC:", aic, "\n")
+cat("BIC:", bic, "\n")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

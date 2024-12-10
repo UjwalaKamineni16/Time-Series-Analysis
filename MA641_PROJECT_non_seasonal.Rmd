@@ -1,0 +1,210 @@
+---
+title: "MA641_PROJECT_nonseasonal"
+author: "Ujwala Kamineni"
+date: "2024-04-06"
+output: pdf_document
+---
+
+```{r}
+# Loading necessary libraries
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(zoo)
+library(tseries)
+
+# Loading the dataset
+data <- read_csv("C:/Users/Lenovo/Downloads/WDIData.csv", show_col_types = FALSE)
+data_long <- data %>%
+  pivot_longer(
+    cols = `1960`:`2018`,
+    names_to = "year", 
+    values_to = "value"
+  )
+
+
+# Grouping by Indicator Name and summarizing missing values
+missing_summary <- data_long %>%
+  group_by(`Indicator Name`) %>%
+  summarize(missing_values = sum(is.na(value)), .groups = 'drop') %>%
+  arrange(missing_values)
+
+# Printing the first few rows of the summary to check indicators with the least missing values
+head(missing_summary)
+```
+```{r}
+selected_indicator <- "Population, total"
+
+# Filter the dataset for the selected indicator
+filtered_data <- data_long %>% 
+  filter(`Indicator Name` == selected_indicator) %>%
+  mutate(year = as.numeric(year))  
+
+head(filtered_data)
+```
+
+```{r}
+# Counting the number of non-NA data points for each country
+data_counts <- filtered_data %>%
+  group_by(`Country Name`) %>%
+  summarize(Count = sum(!is.na(value)), .groups = 'drop') %>%
+  arrange(desc(Count))
+
+country_with_most_data <- data_counts$`Country Name`[1]
+
+# Filtering the data for that country and omitting NA values
+country_data <- filtered_data %>%
+  filter(`Country Name` == country_with_most_data, !is.na(value)) %>%
+  arrange(year)
+head(country_data)
+```
+```{r}
+# Loading necessary library for plotting
+library(forecast)
+
+# Plotting ACF
+acf_plot <- acf(country_data$value, main = "ACF of Population, total")
+pacf_plot <- pacf(country_data$value, main = "PACF of Population, total")
+
+```
+
+```{r}
+# Create a time series plot
+ggplot(country_data, aes(x = year, y = value)) +
+  geom_line() +
+  labs(title = paste("Time Series plot of Population, total", country_with_most_data),
+       x = "Year", y = "Value") +
+  theme_minimal()
+```
+
+```{r}
+# ADF test
+adf_test_result <- adf.test(country_data$value, alternative = "stationary")
+
+# Printing the result
+print(adf_test_result)
+
+```
+```{r}
+data_diff <- diff(country_data$value, lag=12)
+# ADF test on seasonally differenced data
+adf.test(data_diff, alternative="stationary")
+```
+```{r}
+# Visualizing the differenced data
+plot(data_diff, main="Seasonally Differenced Data", xlab="Time", ylab="Value")
+
+# ACF and PACF plots on the final differenced data
+acf(data_diff, main="ACF of Differenced Data")
+pacf(data_diff, main="PACF of Differenced Data")
+```
+
+
+```{r}
+arima_model_p1_d1_q0 <- arima(data_diff, order = c(1, 1, 0))
+arima_model_p2_d1_q0 <- arima(data_diff, order = c(2, 1, 0))
+
+# Checking the summary for each model
+summary(arima_model_p1_d1_q0)
+summary(arima_model_p2_d1_q0)
+
+# Look at AIC and BIC values for each model to compare
+aic_p1_d1_q0 <- AIC(arima_model_p1_d1_q0)
+bic_p1_d1_q0 <- BIC(arima_model_p1_d1_q0)
+
+aic_p2_d1_q0 <- AIC(arima_model_p2_d1_q0)
+bic_p2_d1_q0 <- BIC(arima_model_p2_d1_q0)
+
+# Print the AIC and BIC values
+cat("AIC for ARIMA(1,1,0):", aic_p1_d1_q0, "\n")
+cat("BIC for ARIMA(1,1,0):", bic_p1_d1_q0, "\n")
+
+cat("AIC for ARIMA(2,1,0):", aic_p2_d1_q0, "\n")
+cat("BIC for ARIMA(2,1,0):", bic_p2_d1_q0, "\n")
+
+```
+
+
+```{r}
+library(forecast)
+
+# Using auto.arima to find the best fitting non-seasonal model
+arima_non_seasonal <- auto.arima(data_diff, seasonal = FALSE)
+
+summary(arima_non_seasonal)
+```
+```{r}
+# Displaying criteria for model selection
+cat("AIC for non-seasonal model:", arima_non_seasonal$aic, "\n")
+```
+
+
+```{r}
+library(aod)
+# Checking for parameter significance in the non-seasonal ARIMA model
+library(lmtest)
+coeftest(arima_non_seasonal)
+
+# Wald test to assess the redundancy of parameters
+library(aod)
+model_coefficients <- coef(arima_non_seasonal)
+cov_matrix <- vcov(arima_non_seasonal)
+wald_test_results <- wald.test(b = model_coefficients, 
+                               Sigma = cov_matrix, 
+                               Terms = 1:length(model_coefficients))
+print(wald_test_results)
+```
+```{r}
+# Checking residuals for non-seasonal data
+checkresiduals(arima_non_seasonal)
+qqnorm(nonseasonal_residuals_model1)qqline(nonseasonal_residuals_model1)
+```
+```{r}
+
+library(tseries)
+arima_model <- arima(data_diff, order = c(4, 1, 0))
+
+```
+
+```{r}
+# Calculate the squared residuals
+squared_residuals <- residuals(arima_model)^2
+
+# Load the necessary library for ACF and PACF
+if(!require(forecast)) install.packages("forecast")
+library(forecast)
+
+# Plot ACF and PACF of the squared residuals
+Acf(squared_residuals, main="ACF of Squared Residuals")
+Pacf(squared_residuals, main="PACF of Squared Residuals")
+```
+
+
+```{r}
+library(rugarch)
+
+garch_spec <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+mean.model = list(armaOrder = c(4, 0), include.mean = TRUE),
+distribution.model = "norm")
+# Fit the GARCH model
+garch_fit <- ugarchfit(spec = garch_spec, data = residuals(squared_residuals))
+
+
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
